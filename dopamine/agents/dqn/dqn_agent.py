@@ -31,7 +31,8 @@ import numpy as np
 import tensorflow as tf
 
 import gin.tf
-
+from morph_net.network_regularizers import flop_regularizer
+from morph_net.tools import structure_exporter
 
 # These are aliases which are used by other classes.
 NATURE_DQN_OBSERVATION_SHAPE = atari_lib.NATURE_DQN_OBSERVATION_SHAPE
@@ -307,12 +308,23 @@ class DQNAgent(object):
         name='replay_chosen_q')
 
     target = tf.stop_gradient(self._build_target_q_op())
+
+    network_regularizer = flop_regularizer.GammaFlopsRegularizer(
+        output_boundary=[ self._net_outputs.q_values.op],
+        input_boundary=[self.state_ph.op,target.op],
+        gamma_threshold=1e-3
+    )
+    regularization_strength = 1e-10
+    regularizer_loss = (network_regularizer.get_regularization_term() * regularization_strength)
+
     loss = tf.losses.huber_loss(
         target, replay_chosen_q, reduction=tf.losses.Reduction.NONE)
     if self.summary_writer is not None:
       with tf.variable_scope('Losses'):
         tf.summary.scalar('HuberLoss', tf.reduce_mean(loss))
-    return self.optimizer.minimize(tf.reduce_mean(loss))
+        tf.summary.scalar('RegularizationLoss', regularizer_loss)
+        tf.summary.scalar(network_regularizer.cost_name, network_regularizer.get_cost())
+    return self.optimizer.minimize(tf.reduce_mean(loss) + regularizer_loss)
 
   def _build_sync_op(self):
     """Builds ops for assigning weights from online to target network.
