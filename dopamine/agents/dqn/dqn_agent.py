@@ -309,13 +309,13 @@ class DQNAgent(object):
 
     target = tf.stop_gradient(self._build_target_q_op())
 
-    network_regularizer = flop_regularizer.GammaFlopsRegularizer(
+    self.network_regularizer = flop_regularizer.GammaFlopsRegularizer(
         output_boundary=[ self._net_outputs.q_values.op],
         input_boundary=[self.state_ph.op,target.op],
         gamma_threshold=1e-3
     )
     regularization_strength = 1e-10
-    regularizer_loss = (network_regularizer.get_regularization_term() * regularization_strength)
+    regularizer_loss = (self.network_regularizer.get_regularization_term() * regularization_strength)
 
     loss = tf.losses.huber_loss(
         target, replay_chosen_q, reduction=tf.losses.Reduction.NONE)
@@ -323,7 +323,7 @@ class DQNAgent(object):
       with tf.variable_scope('Losses'):
         tf.summary.scalar('HuberLoss', tf.reduce_mean(loss))
         tf.summary.scalar('RegularizationLoss', regularizer_loss)
-        tf.summary.scalar(network_regularizer.cost_name, network_regularizer.get_cost())
+        tf.summary.scalar(self.network_regularizer.cost_name, self.network_regularizer.get_cost())
     return self.optimizer.minimize(tf.reduce_mean(loss) + regularizer_loss)
 
   def _build_sync_op(self):
@@ -508,6 +508,11 @@ class DQNAgent(object):
         os.path.join(checkpoint_dir, 'tf_ckpt'),
         global_step=iteration_number)
     # Checkpoint the out-of-graph replay buffer.
+    exporter = structure_exporter.StructureExporter(self.network_regularizer.op_regularizer_manager)
+
+    structure_exporter_tensors = self._sess.run([exporter.tensors])[0]
+    exporter.populate_tensor_values(structure_exporter_tensors)
+    exporter.create_file_and_save_alive_counts(checkpoint_dir, self.training_steps)
     self._replay.save(checkpoint_dir, iteration_number)
     bundle_dictionary = {}
     bundle_dictionary['state'] = self.state
